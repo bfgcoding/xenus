@@ -20,6 +20,10 @@ export class Server {
     this.logger.info(`Serving on port: ${port}`);
     const s = serve({ port });
 
+    // Set working directory
+    this.logger.info(this.fullPath);
+    Deno.chdir(this.fullPath);
+
     for await (const req of s) {
       if (req.url.endsWith("favicon.ico")) {
         req.respond({
@@ -28,7 +32,49 @@ export class Server {
         continue;
       }
 
-      this.logger.info(req.url);
+      this.logger.info("Getting controller path");
+      const controllerPath: string = await this.getControllers(req.url).catch(
+        (err) => {
+          this.logger.error(err);
+          req.respond({
+            status: 404,
+            body: `Error: No controller for ${req.url}`,
+          });
+          return "";
+        }
+      );
+
+      if (controllerPath === "") {
+        continue;
+      }
+
+      this.logger.info(controllerPath);
+
+      const controller = await import(controllerPath).catch((err) => {
+        this.logger.error(err);
+      });
+
+      req.respond({
+        body: controller.default(req),
+      });
     }
+  }
+
+  private async getControllers(request: string): Promise<string> {
+    this.logger.info(`Request: ${request}`);
+    const file = request.endsWith("/") ? `${request}index` : request;
+
+    this.logger.info(`File: ${file}`);
+
+    let result: string;
+    try {
+      result = await Deno.realPath(`${file}.controller.ts`);
+    } catch {
+      result = await Deno.realPath(`${file}.ts`).catch((err) => {
+        throw err;
+      });
+    }
+
+    return result;
   }
 }
